@@ -1,9 +1,5 @@
 #include <vector>
-#include <stdexcept>
 #include <thread>
-#include <iostream>
-#include <iomanip>
-#include <condition_variable>
 
 #include "MatrixOperations.h"
 #include "FileWrite.h"
@@ -11,20 +7,19 @@
 
 std::mutex mtx;
 std::condition_variable cv;
+std::condition_variable cv2;
 bool ready = false;
-
-void printStartMatrix(std::vector<std::vector<double>> * srcMatrix);
+bool ready2 = false;
+ThreadPool pool( std::thread::hardware_concurrency());
 
 void matrixOperationsInit(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix)
 {
+
     int dim = srcMatrix->size();
 
     std::vector<std::vector<double>> op1Matrix(dim);
     std::vector<std::vector<double>> op2Matrix(dim);
     std::vector<std::vector<double>> op3Matrix(dim);
-
-    int cpuCount = std::thread::hardware_concurrency();
-    ThreadPool pool(cpuCount);
 
     dstMatrix->resize(dim);
 
@@ -36,13 +31,16 @@ void matrixOperationsInit(std::vector<std::vector<double>> * srcMatrix, std::vec
         dstMatrix->at(i).resize(dim);
     }
 
-    // operation1(srcMatrix, &op1Matrix);
-    // operation2(&op1Matrix, &op2Matrix);
-    // operation3(&op2Matrix, &op3Matrix);
+    // 3 threads, each for one operation, run in parallel to speed up the process
+    std::thread t1(operation1, srcMatrix, &op1Matrix);
+    std::thread t2(operation2, &op1Matrix, &op2Matrix);
+    std::thread t3(operation3, &op2Matrix, &op3Matrix);
     
-    pool.enqueue(operation1, srcMatrix, &op1Matrix);
-    pool.enqueue(operation2, &op1Matrix, &op2Matrix);
-    pool.enqueue(operation3, &op2Matrix, &op3Matrix);
+    // joins after the threads for parallel operations 
+    // join waits for the threads to finish before continuing
+    t1.join();
+    t2.join();
+    t3.join();
 
     for (int i = 0; i < dim; i++)
     {
@@ -60,69 +58,107 @@ void matrixOperationsInit(std::vector<std::vector<double>> * srcMatrix, std::vec
     fileWrite("dstMatrix.txt", dstMatrix);
 }
 
-// operation1 flip the rows to columns
-void operation1(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix)
-{
-    // Loop through rows and columns of the source matrix and flip them 
-    for (int row = 0; row < srcMatrix->size(); row++) {
-        for (int col = 0; col < srcMatrix->at(row).size(); col++) {
-            // dest matrix is now the source matrix flipped on the diagonal
-            dstMatrix->at(col).at(row) = srcMatrix->at(row).at(col);
-        }
+// operation 1
+// Flip the matrix rows to columns
+void operation1(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>>* dstMatrix) {
+    int matrixSize = srcMatrix->size();
+
+    // Loop through rows and columns of the source matrix so we can flip them
+    for (int row = 0; row < matrixSize; row++) {
+        // Set ready cv to false so we can wait for the operation to finish
+        ready = false;
+        // Lock the mutex to prevent matrix from being accessed by the other threads ()
+        std::unique_lock<std::mutex> lock(mtx);
+        // add the operation to the thread pool
+        // (I did a similar thing in a practice at the weekend which was taught from https://codereview.stackexchange.com/questions/229560/implementation-of-a-thread-pool-in-c)
+        pool.enqueue(([ = ]() {
+            // loop through the columns of the matrix to flip them
+            for (int col = 0; col < matrixSize; col++) {
+                // simply change the row and columns
+                dstMatrix->at(row).at(col) = srcMatrix->at(col).at(row);
+            }
+        }));
     }
-    mtx.lock();
+
+    // set ready to true so op2 knows to start as the flip is complete
     ready = true;
-    cv.notify_one();
-    mtx.unlock();
+    // notify op2 thread (lab 6)
+    cv.notify_all();
 }
 
-// operation2 add the current element to all neighbours around it
-// I renamed i and j to row and col so i can think and follow easier
+// operation 2
+// Add the current element to all neighbours around it
 void operation2(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix)
 {
-    std::unique_lock<std::mutex> lock(mtx);
-    while (!ready) {
-        cv.wait(lock);
-    }
+    // set matrix size (same as dim but easier to read) 
+    int matrixSize = srcMatrix->size();
 
-    // Loop through the source matrix and add the current element to all neighbours around it
-    for (int row = 0; row < srcMatrix->size(); row++) {
-        for (int col = 0; col < srcMatrix->size(); col++) {
-            // Get the current element
-            double currentElement = srcMatrix->at(row).at(col);
-
-            // Iterate over the neighbours in row and column to add the current element to them
-            for (int i = -1; i <= 1; i++) {
-                for (int j = -1; j <= 1; j++) {
-                    // Calculate the neighbour's position to add the current element to (the next element in the matrix)
-                    int neighbourRow = row + i;
-                    int neighbourCol = col + j;
-
-                    // Check if the neighbour's is not outside of the matrix so that we dont get an out of bounds error
-                    if (neighbourRow >= 0 && neighbourRow < srcMatrix->size() && neighbourCol >= 0 && neighbourCol < srcMatrix->size()) {
-                        // Add the current element to the neighbour
-                        dstMatrix->at(neighbourRow).at(neighbourCol) += currentElement;
+    // loop through rows 
+    for (int row = 0; row < matrixSize; row++) {
+        // second condition variable false until operation complete
+        ready2 = false;
+        // lock the mutex stopping other threads from accessung
+        std::unique_lock<std::mutex> lock(mtx);
+        // wait for the op1 to finish by checking the ready condition
+        while (!ready) {
+            cv.wait(lock);
+        }
+        // Add the operation to the thread pool to run in parallel
+        pool.enqueue(([ = ]() {
+            // loop through the columns of the matrix to add the current element to all neighbours around it
+            for (int col = 0; col < matrixSize; col++) {
+                    // neighboursAdded i sum current element and all neighbours around it
+                    double neighboursAdded = 0;
+                    // Loop through the neighbours around the current element to add them
+                    for (int neighbourRow = row - 1; neighbourRow <= row + 1; neighbourRow++) {
+                        for (int neighbourCol = col - 1; neighbourCol <= col + 1; neighbourCol++) {
+                            // if the neighbour is within the matrix bounds (not top, bottom, left, right) add it to the sum
+                            if (neighbourRow >= 0 && neighbourRow < matrixSize && neighbourCol >= 0 && neighbourCol < matrixSize) {
+                                // add the neighbour to the neighboursAdded sum
+                                neighboursAdded += srcMatrix->at(neighbourRow).at(neighbourCol);
+                            }
+                        }
                     }
+                    // set the current element in new matrix to the sum of the current element and all neighbours
+                    dstMatrix->at(row).at(col) = neighboursAdded;
+            }
+        }));
+        // set ready2 to true so op3 knows to start
+        ready2 = true;
+        // Notify the treads that the operation is complete
+        cv2.notify_all();
+    }
+}
+
+// operation 3
+// Multiply the matrix rows by columns
+void operation3(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix) {
+    // set matrix size again 
+    int matrixSize = srcMatrix->size();
+    // reize to same size as source
+    dstMatrix->resize(matrixSize, std::vector<double>(matrixSize, 0));
+    // loop through the rows of the matrix so that we can multiply the rows by the columns
+    for (int row = 0; row < matrixSize; row++) {
+        // set lock to prevent other threads from accessing the matrix
+        std::unique_lock<std::mutex> lock(mtx);
+        // wait for the operation 2 to finish before starting
+        while (!ready2) {
+            cv2.wait(lock);
+        }
+
+        // add the operation to the thread pool to run in parallel
+        pool.enqueue([=]() {
+            // Loop through the columns of the matrix to multiply the rows by the columns
+            for (int col = 0; col < matrixSize; col++) {
+                for (int cell = 0; cell < matrixSize; cell++) {
+                    // Multiply the row by the column and add it to the destination matrix
+                    dstMatrix->at(row).at(col) += srcMatrix->at(row).at(cell) * srcMatrix->at(cell).at(col);
                 }
             }
-        }
+        });
     }
 }
 
-// operation3 multiply the matrix by itself, row by column
-// kept this to i j k in line with the powerpoint presentation
-void operation3(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix)
-{
-    // Resize the destination matrix to the same size as the source matrix 
-    dstMatrix->resize(srcMatrix->size(), std::vector<double>(srcMatrix->size(), 0));
 
-    // Multiply the matrix by itself. Get a row, then go column by column
-    for (int i = 0; i < srcMatrix->size(); i++) {           // row
-        for (int j = 0; j < srcMatrix->size(); j++) {       // column
-            for (int k = 0; k < srcMatrix->size(); k++) {   // inner loop
-                // Multiply the row by the column and add it to the destination matrix
-                dstMatrix->at(i).at(j) += srcMatrix->at(i).at(k) * srcMatrix->at(k).at(j); 
-            }
-        }
-    }
-}
+
+
