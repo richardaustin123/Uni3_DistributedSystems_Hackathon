@@ -113,7 +113,7 @@ void operation2(std::vector<std::vector<double>> * srcMatrix, std::vector<std::v
 // kept this to i j k in line with the powerpoint presentation
 void operation3(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix)
 {
-    // Resize the destination matrix to the same size as the source matrix
+    // Resize the destination matrix to the same size as the source matrix 
     dstMatrix->resize(srcMatrix->size(), std::vector<double>(srcMatrix->size(), 0));
 
     // Multiply the matrix by itself. Get a row, then go column by column

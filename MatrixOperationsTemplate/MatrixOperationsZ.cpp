@@ -7,11 +7,11 @@
 
 #include "MatrixOperations.h"
 #include "FileWrite.h"
-#include "ThreadPool.hpp"
 
-std::mutex mtx;
-std::condition_variable cv;
 bool ready = false;
+std::condition_variable cv;
+std::mutex mtx;
+std::vector<bool> processedRows;
 
 void printStartMatrix(std::vector<std::vector<double>> * srcMatrix);
 
@@ -19,12 +19,13 @@ void matrixOperationsInit(std::vector<std::vector<double>> * srcMatrix, std::vec
 {
     int dim = srcMatrix->size();
 
+    processedRows.resize(dim, false);
+
     std::vector<std::vector<double>> op1Matrix(dim);
     std::vector<std::vector<double>> op2Matrix(dim);
     std::vector<std::vector<double>> op3Matrix(dim);
 
     int cpuCount = std::thread::hardware_concurrency();
-    ThreadPool pool(cpuCount);
 
     dstMatrix->resize(dim);
 
@@ -36,13 +37,15 @@ void matrixOperationsInit(std::vector<std::vector<double>> * srcMatrix, std::vec
         dstMatrix->at(i).resize(dim);
     }
 
-    // operation1(srcMatrix, &op1Matrix);
-    // operation2(&op1Matrix, &op2Matrix);
-    // operation3(&op2Matrix, &op3Matrix);
-    
-    pool.enqueue(operation1, srcMatrix, &op1Matrix);
-    pool.enqueue(operation2, &op1Matrix, &op2Matrix);
-    pool.enqueue(operation3, &op2Matrix, &op3Matrix);
+    // Print starting matrix 
+    // printStartMatrix(srcMatrix);
+
+    std::thread t1(operation1, srcMatrix, &op1Matrix);
+    std::thread t2(operation2, &op1Matrix, &op2Matrix);
+    std::thread t3(operation3, &op2Matrix, &op3Matrix);
+    t1.join();
+    t2.join();
+    t3.join();
 
     for (int i = 0; i < dim; i++)
     {
@@ -63,30 +66,27 @@ void matrixOperationsInit(std::vector<std::vector<double>> * srcMatrix, std::vec
 // operation1 flip the rows to columns
 void operation1(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix)
 {
-    // Loop through rows and columns of the source matrix and flip them 
     for (int row = 0; row < srcMatrix->size(); row++) {
         for (int col = 0; col < srcMatrix->at(row).size(); col++) {
-            // dest matrix is now the source matrix flipped on the diagonal
             dstMatrix->at(col).at(row) = srcMatrix->at(row).at(col);
         }
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            processedRows[row] = true;
+        }
+        cv.notify_all();
     }
-    mtx.lock();
-    ready = true;
-    cv.notify_one();
-    mtx.unlock();
 }
 
 // operation2 add the current element to all neighbours around it
 // I renamed i and j to row and col so i can think and follow easier
 void operation2(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix)
 {
-    std::unique_lock<std::mutex> lock(mtx);
-    while (!ready) {
-        cv.wait(lock);
-    }
-
     // Loop through the source matrix and add the current element to all neighbours around it
     for (int row = 0; row < srcMatrix->size(); row++) {
+        std::unique_lock<std::mutex> lock(mtx);
+        cv.wait(lock, [&]{ return processedRows[row]; });
+        lock.unlock();
         for (int col = 0; col < srcMatrix->size(); col++) {
             // Get the current element
             double currentElement = srcMatrix->at(row).at(col);
@@ -124,5 +124,15 @@ void operation3(std::vector<std::vector<double>> * srcMatrix, std::vector<std::v
                 dstMatrix->at(i).at(j) += srcMatrix->at(i).at(k) * srcMatrix->at(k).at(j); 
             }
         }
+    }
+}
+
+void printStartMatrix(std::vector<std::vector<double>> * srcMatrix) {
+    std::cout << "Starting matrix: " << std::endl;
+    for (int i = 0; i < srcMatrix->size(); i++) {
+        for (int j = 0; j < srcMatrix->at(i).size(); j++) {
+            std::cout << srcMatrix->at(i).at(j);
+        }
+        std::cout << std::endl;
     }
 }

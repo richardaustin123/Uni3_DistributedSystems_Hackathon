@@ -10,7 +10,7 @@
 
 // Define a matrix size parameter
 // NOTE: This may be changed
-#define DIM 5
+#define DIM 200
 
 int main()
 {
@@ -28,7 +28,7 @@ int main()
     //srcMatrix = fileRead("srcMatrix.txt", dim); //read matrix from file
 
     // Print out matrix size for user knowledge
-    std::cout << "Matrix size: " << srcMatrix.size() << std::endl;
+    // std::cout << "Matrix size: " << srcMatrix.size() << std::endl;
 
     // Repeat the operations 10 times to get an averaged execution time
     for (int i = 0; i < 10; i++)
@@ -62,7 +62,7 @@ int main()
     // Loop through all the intervals in the vector and sum them in the cumulative variable above
     for (int i = 0; i < timeIntervals.size(); i++)
     {
-        std::cout << timeIntervals[i] << " ms" << std::endl;
+        // std::cout << timeIntervals[i] << " ms" << std::endl;
         sum += timeIntervals[i];
     }
 

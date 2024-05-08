@@ -3,11 +3,13 @@
 #include <thread>
 #include <iostream>
 #include <iomanip>
+#include <future>
 
 #include "MatrixOperations.h"
 #include "FileWrite.h"
 
 void printStartMatrix(std::vector<std::vector<double>> * srcMatrix);
+void processRow(int row, std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix);
 
 void matrixOperationsInit(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix)
 {
@@ -32,12 +34,9 @@ void matrixOperationsInit(std::vector<std::vector<double>> * srcMatrix, std::vec
     // Print starting matrix 
     // printStartMatrix(srcMatrix);
 
-    std::thread t1(operation1, srcMatrix, &op1Matrix);
-    t1.join();
-    std::thread t2(operation2, &op1Matrix, &op2Matrix);
-    t2.join();
-    std::thread t3(operation3, &op2Matrix, &op3Matrix);
-    t3.join();
+    operation1(srcMatrix, &op1Matrix);
+    operation2(&op1Matrix, &op2Matrix);
+    operation3(&op2Matrix, &op3Matrix);
 
     for (int i = 0; i < dim; i++)
     {
@@ -68,31 +67,42 @@ void operation1(std::vector<std::vector<double>> * srcMatrix, std::vector<std::v
 
 }
 
+void processRow(int row, std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix)
+{
+    for (int col = 0; col < srcMatrix->size(); col++) {
+        // Get the current element
+        double currentElement = srcMatrix->at(row).at(col);
+
+        // Iterate over the neighbours in row and column to add the current element to them
+        for (int i = -1; i <= 1; i++) {
+            for (int j = -1; j <= 1; j++) {
+                // Calculate the neighbour's position to add the current element to (the next element in the matrix)
+                int neighbourRow = row + i;
+                int neighbourCol = col + j;
+
+                // Check if the neighbour's is not outside of the matrix so that we dont get an out of bounds error
+                if (neighbourRow >= 0 && neighbourRow < srcMatrix->size() && neighbourCol >= 0 && neighbourCol < srcMatrix->size()) {
+                    // Add the current element to the neighbour
+                    dstMatrix->at(neighbourRow).at(neighbourCol) += currentElement;
+                }
+            }
+        }
+    }
+}
+
 // operation2 add the current element to all neighbours around it
 // I renamed i and j to row and col so i can think and follow easier
 void operation2(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix)
 {
+    std::vector<std::future<void>> futures;
+
     // Loop through the source matrix and add the current element to all neighbours around it
     for (int row = 0; row < srcMatrix->size(); row++) {
-        for (int col = 0; col < srcMatrix->size(); col++) {
-            // Get the current element
-            double currentElement = srcMatrix->at(row).at(col);
+        futures.push_back(std::async(std::launch::async, processRow, row, srcMatrix, dstMatrix));
+    }
 
-            // Iterate over the neighbours in row and column to add the current element to them
-            for (int i = -1; i <= 1; i++) {
-                for (int j = -1; j <= 1; j++) {
-                    // Calculate the neighbour's position to add the current element to (the next element in the matrix)
-                    int neighbourRow = row + i;
-                    int neighbourCol = col + j;
-
-                    // Check if the neighbour's is not outside of the matrix so that we dont get an out of bounds error
-                    if (neighbourRow >= 0 && neighbourRow < srcMatrix->size() && neighbourCol >= 0 && neighbourCol < srcMatrix->size()) {
-                        // Add the current element to the neighbour
-                        dstMatrix->at(neighbourRow).at(neighbourCol) += currentElement;
-                    }
-                }
-            }
-        }
+    for(auto &f : futures) {
+        f.get();
     }
 }
 
@@ -100,7 +110,7 @@ void operation2(std::vector<std::vector<double>> * srcMatrix, std::vector<std::v
 // kept this to i j k in line with the powerpoint presentation
 void operation3(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix)
 {
-    // Resize the destination matrix to the same size as the source matrix
+    // Resize the destination matrix to the same size as the source matrix 
     dstMatrix->resize(srcMatrix->size(), std::vector<double>(srcMatrix->size(), 0));
 
     // Multiply the matrix by itself. Get a row, then go column by column
