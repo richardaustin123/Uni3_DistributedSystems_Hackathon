@@ -10,7 +10,7 @@
 
 // Define a matrix size parameter
 // NOTE: This may be changed
-#define DIM 200
+#define DIM 300
 
 int main()
 {

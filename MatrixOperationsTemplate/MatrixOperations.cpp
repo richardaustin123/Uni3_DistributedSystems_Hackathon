@@ -1,5 +1,9 @@
 #include <vector>
 #include <thread>
+#include <stdexcept>
+#include <iostream>
+#include <iomanip>
+#include <condition_variable>
 
 #include "MatrixOperations.h"
 #include "FileWrite.h"
@@ -135,8 +139,6 @@ void operation2(std::vector<std::vector<double>> * srcMatrix, std::vector<std::v
 void operation3(std::vector<std::vector<double>> * srcMatrix, std::vector<std::vector<double>> * dstMatrix) {
     // set matrix size again 
     int matrixSize = srcMatrix->size();
-    // reize to same size as source
-    dstMatrix->resize(matrixSize, std::vector<double>(matrixSize, 0));
     // loop through the rows of the matrix so that we can multiply the rows by the columns
     for (int row = 0; row < matrixSize; row++) {
         // set lock to prevent other threads from accessing the matrix
